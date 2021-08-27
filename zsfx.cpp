@@ -18,7 +18,7 @@ c:\mingw32\bin\g++ -m32 -O3  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static
 
 */
 
-#define ZSFX_VERSION "52.2"
+#define ZSFX_VERSION "52.3"
 #define _FILE_OFFSET_BITS 64  // In Linux make sizeof(off_t) == 8
 #define UNICODE  // For Windows
 #include "libzpaq.h"
@@ -95,7 +95,8 @@ inline char *  migliaia(uint64_t n)
 // Handle errors in libzpaq and elsewhere
 void libzpaq::error(const char* msg) {
   if (strstr(msg, "ut of memory")) throw std::bad_alloc();
-  throw std::runtime_error(msg);
+printf("%s\n",msg);
+exit(0);
 }
 using libzpaq::error;
 
@@ -318,8 +319,8 @@ const bool ads=strstr(filename, ":$DATA")!=0;  // alternate data stream?
 // Print file open error and throw exception
 void ioerr(const char* msg) {
   printerr(msg);
-  throw std::runtime_error(msg);
-}
+  exit(0);
+ }
 
 // Create directories as needed. For example if path="/tmp/foo/bar"
 // then create directories /, /tmp, and /tmp/foo unless they exist.
@@ -2158,11 +2159,13 @@ string Jidac::findcommand(int64_t& o_offset)
 	string comando="";
 	readSize = fread(buffer, 1, blockSize, inFile);
 
-	if (readSize==blockSize)
-	{
-		printf("2290: SFX module seems huge!\n");
-		exit(0);
-	}
+	bool flagbuilder=(myname=="zsfx.exe")||(myname=="zsfx32.exe");
+	if (flagbuilder)
+		if (readSize==blockSize)
+		{
+			printf("2290: SFX module seems huge!\n");
+			exit(0);
+		}
 	
 	if (readSize<=0)
 	{
