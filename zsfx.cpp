@@ -18,7 +18,7 @@ c:\mingw32\bin\g++ -m32 -O3  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static
 
 */
 
-#define ZSFX_VERSION "52.3"
+#define ZSFX_VERSION "52.4"
 #define _FILE_OFFSET_BITS 64  // In Linux make sizeof(off_t) == 8
 #define UNICODE  // For Windows
 #include "libzpaq.h"
@@ -746,7 +746,9 @@ public:
 	friend struct ExtractJob;
 private:
 	int64_t startzpaq; // where the data begin
+	string exename;
 	string myname;
+	string myoutput;
   // Command line arguments
 	char command;             // command 'a', 'x', or 'l'
 	string archive;           // archive name
@@ -789,8 +791,13 @@ private:
 
 // Print help message
 void Jidac::usage() {
-  printf("Usage:   zsfx x nameofzpaqfile -to somewhere -all -key password (...)\n");
-  printf("Example: zsfx x z:\\1.zpaq -to y:\\testme\\\n");
+	printf("\nGitHub https://github.com/fcorbelli/zsfx\n\n");
+
+  printf("Usage:   %s x nameofzpaqfile (...zpaq extraction options) (-output mynewsfx.exe)\n\n",exename.c_str());
+  printf("Ex: %s x z:\\1.zpaq\n",exename.c_str());
+  printf("Ex: %s x z:\\1.zpaq -to .\\xtracted\\\n",exename.c_str());
+  printf("Ex: %s x z:\\1.zpaq -to y:\\testme\\ -output z:\\mynewsfx.exe",exename.c_str());
+  printf("\nDo NOT call the output file zsfx.exe or zsfx32.exe\n");
   exit(1);
 }
 
@@ -830,6 +837,16 @@ void scambia(string& i_str)
     for (int i=0;i<n/2;i++)
         std::swap(i_str[i],i_str[n-i-1]);
 }
+
+bool myreplace(string& i_str, const string& i_from, const string& i_to) 
+{
+    size_t start_pos = i_str.find(i_from);
+    if(start_pos == std::string::npos)
+        return false;
+    i_str.replace(start_pos, i_from.length(), i_to);
+    return true;
+}
+
 // Parse the command line. Return 1 if error else 0.
 int Jidac::doCommand(int argc, const char** argv) 
 {
@@ -852,15 +869,26 @@ int Jidac::doCommand(int argc, const char** argv)
 	version=DEFAULT_VERSION;
 	date=0;
 
+	myoutput="";
 
+#if defined(_WIN64)
+	exename="zsfx";
+#else
+	exename="zsfx32";
+#endif
+
+	
+	
 	/// note: argv[0] does not have path.
 	myname=argv[0];
 	myname=extractfilename(myname);
 	if (!strstr(myname.c_str(), ".exe"))
 		myname+=".exe";
 	
+	///printf("myname is |%s|\n",myname.c_str());
+		
 	
-	printf("zsfxfranz v" ZSFX_VERSION " compiled "
+	printf("zsfx(franz) v" ZSFX_VERSION " by Franco Corbelli - compiled "
          __DATE__ "\n");
 
 
@@ -870,7 +898,8 @@ int Jidac::doCommand(int argc, const char** argv)
 	if (!flagbuilder)
 	{
 		string comandi=findcommand(startzpaq);
-		printf("Extracting from EXE with commands %s\n",comandi.c_str());
+		///printf("Extracting from EXE with commands %s\n",comandi.c_str());
+		printf("Extracting from EXE\n");
 		//printf("Start   %ld\n",startzpaq);
 		if (startzpaq==0)
 		{
@@ -880,6 +909,12 @@ int Jidac::doCommand(int argc, const char** argv)
 		
 		///printf("ARGC prima vale %d\n",argc);
 
+/*
+		for (int i=0;i<argc;i++)
+		{
+			printf("XXXXX %d %s\n",i,argv[i]);
+		}
+	*/	
 		std::wstring wcomandi=utow(comandi.c_str());
 		wchar_t* ptr = _wcsdup(wcomandi.c_str());
 		LPWSTR* argw=CommandLineToArgvW(ptr, &argc);
@@ -895,7 +930,12 @@ int Jidac::doCommand(int argc, const char** argv)
 			argp[i]=args[i].c_str();
 		}
 		argv=&argp[0];
-
+		/*
+		for (int i=0;i<argc;i++)
+		{
+			printf("||||||||| %d %s\n",i,argv[i]);
+		}
+		*/
 			
 	}
 
@@ -918,6 +958,10 @@ int Jidac::doCommand(int argc, const char** argv)
 	if (flagbuilder)
 		for (int i=1; i<argc; i++) 
 		{
+//			if (i==1)
+	//		{
+		//		printf("Entering the zpaq %s\n",argv[2]);
+			//}
 			thecommands+=argv[i];
 			if (i<argc-1)
 				thecommands+=" ";
@@ -935,6 +979,10 @@ int Jidac::doCommand(int argc, const char** argv)
 			const char* slash=strrchr(argv[i], '/');
 			const char* dot=strrchr(slash ? slash : argv[i], '.');
 			if (!dot && archive!="") archive+=".zpaq";
+			
+			///archive='"'+archive+'"';
+			
+			
 			while (++i<argc && argv[i][0]!='-')  // read filename args
 				files.push_back(argv[i]);
 			--i;
@@ -974,6 +1022,17 @@ int Jidac::doCommand(int argc, const char** argv)
     }
     else if (opt=="-threads" && i<argc-1) threads=atoi(argv[++i]);
     else if (opt[1]=='t') threads=atoi(argv[i]+2);
+	else if (opt=="-output")
+		{
+			if (myoutput=="")
+			{
+				if (++i<argc && argv[i][0]!='-')  
+					myoutput=argv[i];
+				else
+					i--;
+			}
+		}
+
     else if (opt=="-until" && i+1<argc) {  // read date
 
       // Read digits from multiple args and fill in leading zeros
@@ -1021,7 +1080,7 @@ int Jidac::doCommand(int argc, const char** argv)
     }
     else {
       printf("Unknown option ignored: %s\n", argv[i]);
-      usage();
+      ///usage();
     }
   }
 
@@ -1052,7 +1111,14 @@ int Jidac::doCommand(int argc, const char** argv)
 		return extract();
 	}
 	else
-	if (command=='x') return sfx(thecommands);
+	if (command=='x') 
+	{
+		///printf("JJJJ archive %s\n",archive.c_str());
+		string rimpiazza="dummy.zpaq";
+		myreplace(thecommands,archive,rimpiazza);
+		///printf("JJJJ the com %s\n",thecommands.c_str());
+		return sfx(thecommands);
+	}
 	else usage();
 	return 0;
 }
@@ -1383,15 +1449,11 @@ inline void puti(libzpaq::StringBuffer& sb, uint64_t x, int n) {
   for (; n>0; --n) sb.put(x&255), x>>=8;
 }
 
-// Print percent done (td/ts) and estimated time remaining
-void print_progress(int64_t ts, int64_t td, int sum) {
+void print_progress(int64_t ts, int64_t td) 
+{
   if (td>ts) td=ts;
-  if (td>=1000000) {
-    double eta=0.001*(mtime()-global_start)*(ts-td)/(td+1.0);
-    printf("%5.2f%% %d:%02d:%02d ", td*100.0/(ts+0.5),
-       int(eta/3600), int(eta/60)%60, int(eta)%60);
-    if (sum>0) printf("\r"), fflush(stdout);
-  }
+  if (td>=1000000) 
+	printf("%5.2f%%\r", td*100.0/(ts+0.5));
 }
 
 // For writing to two archives at once
@@ -1558,10 +1620,13 @@ ThreadReturn decompressThread(void* arg) {
         d.readComment();
         while (out.size()<output_size && d.decompress(1<<14));
         lock(job.mutex);
-        print_progress(job.total_size, job.total_done, job.jd.summary);
-        if (job.jd.summary<=0)
+        print_progress(job.total_size, job.total_done);
+        /*
+		if (job.jd.summary<=0)
           printf("[%d..%d] -> %1.0f\n", b.start, b.start+b.size-1,
               out.size()+0.0);
+			  */
+			
         release(job.mutex);
         if (out.size()>=output_size) break;
         d.readSegmentEnd();
@@ -1662,12 +1727,15 @@ ThreadReturn decompressThread(void* arg) {
             makepath(filename);
             if (job.jd.summary<=0) {
               lock(job.mutex);
-              print_progress(job.total_size, job.total_done, job.jd.summary);
-              if (job.jd.summary<=0) {
-                printf("> ");
+              print_progress(job.total_size, job.total_done);
+              /*
+			  if (job.jd.summary<=0) {
+                printf("1> ");
                 printUTF8(filename.c_str());
                 printf("\n");
               }
+			  */
+			  
               release(job.mutex);
             }
 			{
@@ -1879,8 +1947,8 @@ int Jidac::extract() {
   
 
   // Decompress archive in parallel
-  printf("Extracting %1.6f MB in %d files -threads %d\n",
-      job.total_size/1000000.0, total_files, threads);
+  printf("Extracting %s bytes in %d files -threads %d\n",
+      migliaia(job.total_size), total_files, threads);
   vector<ThreadID> tid(threads);
   for (unsigned i=0; i<tid.size(); ++i) run(tid[i], decompressThread, &job);
 
@@ -1920,7 +1988,7 @@ int Jidac::extract() {
                 dtptr=b.files[k];
                 lock(job.mutex);
                 if (summary<=0) {
-                  printf("> ");
+                  printf("2> ");
                   printUTF8(outname.c_str());
                   printf("\n");
                 }
@@ -2207,20 +2275,26 @@ string Jidac::findcommand(int64_t& o_offset)
 
 int Jidac::sfx(string i_thecommands)
 {
+	
 	bool	flagbuilder=(myname=="zsfx.exe")||(myname=="zsfx32.exe");
 	if (!flagbuilder)
 	{
 		printf("2351: I need to extract\n");
 		return 1;
 	}
-		
+	
+	
 	printf("Command line  : %s\n",i_thecommands.c_str());
 	printf("Archive name  : %s\n",archive.c_str());
+	printf("Output  name  : %s\n",myoutput.c_str());
 
-	string outfile=prendinomefileebasta(archive);
-	string percorso=extractfilepath(archive);
-	
+	if (myoutput=="")
+		myoutput=archive;
+		
+	string outfile	=prendinomefileebasta(myoutput);
+	string percorso	=extractfilepath(myoutput);
 	outfile=percorso+outfile+".exe";
+	
 	if (fileexists(outfile))
 	{
 		printf("2334: output file exists, abort %s\n",outfile.c_str());
@@ -2261,6 +2335,8 @@ int Jidac::sfx(string i_thecommands)
 	
 	for (unsigned int i=0;i<g_franzo_start.size();i++)
 		fwrite(&g_franzo_start[i],1,1,outFile);
+
+///	printf("The command before %s\n",i_thecommands[0]);
 	
 	for (unsigned int i=0;i<i_thecommands.size();i++)
 		fwrite(&i_thecommands[i],1,1,outFile);
