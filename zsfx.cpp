@@ -18,7 +18,7 @@ c:\mingw32\bin\g++ -m32 -O3  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static
 
 */
 
-#define ZSFX_VERSION "52.4"
+#define ZSFX_VERSION "52.12"
 #define _FILE_OFFSET_BITS 64  // In Linux make sizeof(off_t) == 8
 #define UNICODE  // For Windows
 #include "libzpaq.h"
@@ -40,6 +40,8 @@ using std::max;
 using libzpaq::StringBuffer;
 string g_franzo_start;
 string g_franzo_end;
+
+#define DEBUGX
 
 
 bool isdirectory(string i_filename)
@@ -740,10 +742,11 @@ string getmyname()
 class Jidac 
 {
 public:
-	int doCommand(int argc, const char** argv);
+	int doCommand(int argc,  char** argv);
 	friend ThreadReturn decompressThread(void* arg);
 	friend ThreadReturn testThread(void* arg);
 	friend struct ExtractJob;
+	string archive;           // archive name
 private:
 	int64_t startzpaq; // where the data begin
 	string exename;
@@ -751,10 +754,10 @@ private:
 	string myoutput;
   // Command line arguments
 	char command;             // command 'a', 'x', or 'l'
-	string archive;           // archive name
 	vector<string> files;     // filename args
 	int all;                  // -all option
 	bool force;               // -force option
+	
 	char password_string[32]; // hash of -key argument
 	const char* password;     // points to password_string or NULL
 	bool noattributes;        // -noattributes option
@@ -790,15 +793,21 @@ private:
  };
 
 // Print help message
-void Jidac::usage() {
+void Jidac::usage() 
+{
 	printf("\nGitHub https://github.com/fcorbelli/zsfx\n\n");
 
-  printf("Usage:   %s x nameofzpaqfile (...zpaq extraction options) (-output mynewsfx.exe)\n\n",exename.c_str());
-  printf("Ex: %s x z:\\1.zpaq\n",exename.c_str());
-  printf("Ex: %s x z:\\1.zpaq -to .\\xtracted\\\n",exename.c_str());
-  printf("Ex: %s x z:\\1.zpaq -to y:\\testme\\ -output z:\\mynewsfx.exe",exename.c_str());
-  printf("\nDo NOT call the output file zsfx.exe or zsfx32.exe\n");
-  exit(1);
+	printf("Usage 1: %s x nameofzpaqfile (...zpaq extraction switches) (-output mynewsfx.exe)\n",exename.c_str());
+	printf("Ex    1: %s x z:\\1.zpaq\n",exename.c_str());
+	printf("Ex    1: %s x z:\\1.zpaq -to .\\xtracted\\\n",exename.c_str());
+	printf("Ex    1: %s x z:\\1.zpaq -to y:\\testme\\ -output z:\\mynewsfx.exe",exename.c_str());
+	printf("\n\n");
+	printf("Usage 2: Autoextract .zpaq with the same name of the .exe (if any)\n");
+	printf("Ex    2: c:\\pippo\\testme.exe (a copy of %s.exe) will autoextract c:\\pippo\\testme.zpaq\n",exename.c_str());
+	printf("Note  2: encrypted autoextracted-archives are supported (-key)\n");
+	printf("\nFilenames zsfx.exe/zsfx32.exe are used, do NOT rename\n");
+	printf("Switches -all -force -noattributes -not -only -to -summary -threads -until\n");
+	exit(1);
 }
 
 // return a/b such that there is exactly one "/" in between, and
@@ -846,9 +855,101 @@ bool myreplace(string& i_str, const string& i_from, const string& i_to)
     i_str.replace(start_pos, i_from.length(), i_to);
     return true;
 }
+#include <conio.h>
+string getpassword()
+{
+	string myresult="";
+	printf("\nEnter password :");
+	char carattere;
+	while (1)
+	{
+		carattere=getch();
+		if(carattere=='\r')
+			break;
+		printf("*");
+		myresult+=carattere;
+	}
+	printf("\n");
+	return myresult;
+/*
+	char myline[251];
+	unsigned int i=0;
+    int c;
+	printf("\nEnter password (max %d chars):",(int)sizeof(myline)-1);
+	
+	while (1)
+	{
+		while (( (c = getchar())!='\n') && (c!= EOF) && (i< sizeof(myline)-1) )
+			myline[i++] = c;
+		myline[i] = '\0';
+		myresult=myline;
+		if (myresult!="")
+				break;
+	}
+	return myresult;
+	*/
+}
+
+FILE* freadopen(const char* i_filename)
+{
+	std::wstring widename=utow(i_filename);
+	FILE* myfp=_wfopen(widename.c_str(), L"rb" );
+	if (myfp==NULL)
+	{
+		printf( "\nfreadopen cannot open:");
+		printUTF8(i_filename);
+		printf("\n");
+		return 0;
+	}
+	return myfp;
+}
+
+bool check_if_password(string i_filename)
+{
+	FILE* inFile = freadopen(i_filename.c_str());
+	if (inFile==NULL) 
+	{
+		int err=GetLastError();
+		printf("\n2057: ERR <%s> kind %d\n",i_filename.c_str(),err); 
+		exit(0);
+	}
+    char s[4]={0};
+    const int nr=fread(s,1,4,inFile);
+///	for (int i=0;i<4;i++)
+///		printf("%d  %c  %d\n",i,s[i],s[i]);
+	fclose(inFile);
+    if (nr>0 && memcmp(s, "7kSt", 4) && (memcmp(s, "zPQ", 3) || s[3]<1))
+		return true;
+	return false;
+}
+
+
+void explode(string i_string,char i_delimiter,vector<string>& array)
+{
+	///printf("1\n");
+//	printf("Delimiter %c\n",i_delimiter);
+//	printf("2\n");
+	//printf("String %s\n",i_string.c_str());
+	unsigned int i=0;
+	while(i<i_string.size())
+	{
+		string temp="";
+///		printf("entro %02d %c %d\n",i,i_string[i],(int)(i_string[i]!=i_delimiter));
+		while ((i_string[i]!=i_delimiter) && (i<i_string.size()))
+        {
+			temp+=i_string[i];
+			i++;
+		}
+		array.push_back(temp);
+		i++;
+		if (i>=i_string.size())
+			break;
+    }
+}
+
 
 // Parse the command line. Return 1 if error else 0.
-int Jidac::doCommand(int argc, const char** argv) 
+int Jidac::doCommand(int argc,  char** argv) 
 {
 	/// Random 40-bytes long tags. Note: inverting is mandatory
 	g_franzo_start="dnE3pipUzeiUo8BMxVKlQTIfLjmskQbhlqBobVVr";
@@ -891,54 +992,56 @@ int Jidac::doCommand(int argc, const char** argv)
 	printf("zsfx(franz) v" ZSFX_VERSION " by Franco Corbelli - compiled "
          __DATE__ "\n");
 
-
+	
 	startzpaq=0;
-		
+	
+	bool 	autoextract=(archive!="");
 	bool	flagbuilder=(myname=="zsfx.exe")||(myname=="zsfx32.exe");
+
+	libzpaq::Array<char*> argp(100);
+		
+	if (!autoextract)
 	if (!flagbuilder)
 	{
 		string comandi=findcommand(startzpaq);
-		///printf("Extracting from EXE with commands %s\n",comandi.c_str());
-		printf("Extracting from EXE\n");
-		//printf("Start   %ld\n",startzpaq);
+		printf("Extracting from EXE with parameters: x %s\n",comandi.c_str());
+		//printf("Extracting from EXE\n");
+		///printf("Start   %ld\n",startzpaq);
 		if (startzpaq==0)
 		{
 			printf("860:Something is WRONG\n");
 			exit(0);
 		}
-		
-		///printf("ARGC prima vale %d\n",argc);
-
-/*
+/*		
+		printf("ARGC prima vale %d\n",argc);
 		for (int i=0;i<argc;i++)
 		{
 			printf("XXXXX %d %s\n",i,argv[i]);
 		}
-	*/	
-		std::wstring wcomandi=utow(comandi.c_str());
-		wchar_t* ptr = _wcsdup(wcomandi.c_str());
-		LPWSTR* argw=CommandLineToArgvW(ptr, &argc);
-		free(ptr);
-		
-		///printf("ARGC dopo vale %d\n",argc);
-		
-		vector<string> args(argc);
-		libzpaq::Array<const char*> argp(argc);
-		for (int i=0; i<argc; ++i) 
-		{
-			args[i]=wtou(argw[i]);
-			argp[i]=args[i].c_str();
-		}
-		argv=&argp[0];
-		/*
-		for (int i=0;i<argc;i++)
-		{
-			printf("||||||||| %d %s\n",i,argv[i]);
-		}
 		*/
-			
-	}
+		vector<string> array_command;
+		explode(comandi,' ',array_command);
+		argc=array_command.size();
+		
+#if defined(DEBUG)
+		for (unsigned int i=0;i<array_command.size();i++)
+			printf("i  %d  %s\n",i,array_command[i].c_str());
+#endif
 
+		for (int i=0; i<argc; ++i) 
+			argp[i]=(char*)array_command[i].c_str();
+
+#if defined(DEBUG)			
+		for (int i=0; i<argc; ++i) 
+			printf("|||%s|||\n",argp[i]);
+#endif
+
+		argv=&argp[0];
+		
+	}
+#if defined(DEBUG)
+	printf("K1\n");
+#endif
 
   // Init archive state
   ht.resize(1);  // element 0 not used
@@ -955,24 +1058,31 @@ int Jidac::doCommand(int argc, const char** argv)
 	string thecommands="";
 	
 	/// compile a string from all argv (to be stored)
+	if (!autoextract)
 	if (flagbuilder)
 		for (int i=1; i<argc; i++) 
 		{
-//			if (i==1)
-	//		{
-		//		printf("Entering the zpaq %s\n",argv[2]);
-			//}
 			thecommands+=argv[i];
 			if (i<argc-1)
 				thecommands+=" ";
 		}	
+#if defined(DEBUG)
+	printf("K2\n");
+	printf("Argc vale %d\n",argc);
+	for (int i=0; i<argc;i++)
+	{
+		printf("$$$$%s$$$$\n",argv[i]);
+	}
+#endif
 
 	for (int i=1; i<argc; ++i) 
 	{
 		const string opt=argv[i];  // read command
-
-		if ((opt=="sfx" || opt=="x")
-        && i<argc-1 && argv[i+1][0]!='-' && command==0) 
+#if defined(DEBUG)
+		printf("argc vale %d  i %d  %s\n",argc,i,opt.c_str());
+#endif
+		if ((!autoextract) && ((opt=="sfx" || opt=="x")
+        && i<argc-1 && argv[i+1][0]!='-' && command==0)) 
 		{
 			command=opt[0];
 			archive=argv[++i];  // append ".zpaq" to archive if no extension
@@ -993,12 +1103,33 @@ int Jidac::doCommand(int argc, const char** argv)
       if (i<argc-1 && isdigit(argv[i+1][0])) all=atoi(argv[++i]);
     }
     else if (opt=="-force" || opt=="-f") force=true;
-    else if (opt=="-key" && i<argc-1) {
-      libzpaq::SHA256 sha256;
-      for (const char* p=argv[++i]; *p; ++p) sha256.put(*p);
-      memcpy(password_string, sha256.result(), 32);
-      password=password_string;
-    }
+	
+	else if (opt=="-key") 
+		{
+			if (i<argc-1) // I am not the last parameter
+				if (argv[i+1][0]!='-') // -key pippo -whirlpool
+				{
+					libzpaq::SHA256 sha256;
+					for (const char* p=argv[++i]; *p; ++p)
+						sha256.put(*p);
+					memcpy(password_string, sha256.result(), 32);
+					password=password_string;
+				}
+			if (password==NULL)
+			{
+				string spassword=getpassword();
+				///printf("entered <<%s>>\n",spassword.c_str());
+				if (spassword!="")
+				{
+					libzpaq::SHA256 sha256;
+					for (unsigned int i=0;i<spassword.size();i++)
+						sha256.put(spassword[i]);
+					memcpy(password_string, sha256.result(), 32);
+					password=password_string;
+				}
+				
+			}
+		}
     else if (opt=="-noattributes") noattributes=true;
     else if (opt=="-not") {  // read notfiles
       while (++i<argc && argv[i][0]!='-') {
@@ -1104,6 +1235,26 @@ int Jidac::doCommand(int argc, const char** argv)
 
   // Execute command
 	else 
+	if (autoextract)
+	{
+		command='x';
+		if (password==NULL)
+			if (check_if_password(archive))
+			{
+				printf("Archive seems encrypted (or corrupted)");
+				string spassword=getpassword();
+				if (spassword!="")
+				{
+					libzpaq::SHA256 sha256;
+					for (unsigned int i=0;i<spassword.size();i++)
+						sha256.put(spassword[i]);
+					memcpy(password_string, sha256.result(), 32);
+					password=password_string;
+				}
+			}
+		return extract();
+	
+	}
 	if (startzpaq>0)
 	{
 		/// Houston, the magic is into startzpaq
@@ -1111,17 +1262,19 @@ int Jidac::doCommand(int argc, const char** argv)
 		return extract();
 	}
 	else
-	if (command=='x') 
-	{
-		///printf("JJJJ archive %s\n",archive.c_str());
+	if (command=='x')
+	{	
 		string rimpiazza="dummy.zpaq";
 		myreplace(thecommands,archive,rimpiazza);
-		///printf("JJJJ the com %s\n",thecommands.c_str());
+		rimpiazza="dummy.exe";
+		myreplace(thecommands,myoutput,rimpiazza);
+		
 		return sfx(thecommands);
 	}
 	else usage();
 	return 0;
 }
+
 
 /////////////////////////// read_archive //////////////////////////////
 
@@ -1423,9 +1576,9 @@ endblock:;
   }  // end while !done
   if (in.tell()>32*(password!=0) && !found_data)
     error("archive contains no data");
-  printf("%d versions, %u files, %u fragments, %1.6f MB\n", 
-      int(ver.size()-1), files, unsigned(ht.size())-1,
-      block_offset/1000000.0);
+  printf("%d versions, %u files, %s bytes\n", 
+      int(ver.size()-1), files,
+      migliaia(block_offset));
 
   // Calculate file sizes
   for (DTMap::iterator p=dt.begin(); p!=dt.end(); ++p) {
@@ -1848,9 +2001,14 @@ struct OutputFile: public libzpaq::Writer {
 // existing files and set the dates and attributes of exising directories.
 // Otherwise create only new files and directories. Return 1 if error else 0.
 
+bool yesorno(int i_ok)
+{
+	int n = getch();
+	return (n==i_ok);
+    ///printf("%d %c\n", n, n);
+}
 // This is just equal to ZPAQ 7.15, so can works with zpaqfranz too
 int Jidac::extract() {
-
   // Read archive
   const int64_t sz=read_archive(archive.c_str());
   if (sz<1) error("archive not found");
@@ -1876,11 +2034,31 @@ int Jidac::extract() {
   // and set date and attributes.
   ExtractJob job(*this);
   int total_files=0, skipped=0;
+  
+  bool flagask=true;
+  
+  
   for (DTMap::iterator p=dt.begin(); p!=dt.end(); ++p) {
     p->second.data=-1;  // skip
     if (p->second.date && p->first!="") {
       const string fn=rename(p->first);
       const bool isdir=p->first[p->first.size()-1]=='/';
+	  
+	  if (!force && exists(fn)) 
+		if (flagask)
+		{
+			printf("Overwrite ALL already existing files  (y/n)?\n");
+			force=yesorno('y');
+			flagask=false;
+#if defined (DEBUG)
+			if (force)
+				printf("FORZA\n");
+			else
+				printf("mantieni\n");
+#endif
+		}
+	  
+	  
       if (force && !isdir && equal(p, fn.c_str())) {
         if (summary<=0) {  // identical
           printf("= ");
@@ -1890,8 +2068,11 @@ int Jidac::extract() {
         close(fn.c_str(), p->second.date, p->second.attr);
         ++skipped;
       }
-      else if (!force && exists(fn)) {  // exists, skip
-        if (summary<=0) {
+      else if (!force && exists(fn)) 
+	  {  // exists, skip
+		
+
+	  if (summary<=0) {
           printf("? ");
           printUTF8(fn.c_str());
           printf("\n");
@@ -1940,7 +2121,7 @@ int Jidac::extract() {
     }  // end if selected
   }  // end for
   if (!force && skipped>0)
-    printf("%d ?existing files skipped (-force overwrites).\n", skipped);
+    printf("%d ?existing files skipped.\n", skipped);
   if (force && skipped>0)
     printf("%d =identical files skipped.\n", skipped);
 
@@ -2096,19 +2277,34 @@ int main()
 	int argc=0;
 	LPWSTR* argw=CommandLineToArgvW(GetCommandLine(), &argc);
 	vector<string> args(argc);
-	libzpaq::Array<const char*> argp(argc);
+	libzpaq::Array<char*> argp(argc);
 	for (int i=0; i<argc; ++i) 
 	{
 		args[i]=wtou(argw[i]);
-		argp[i]=args[i].c_str();
+		argp[i]=(char*)args[i].c_str();
 	}
-	const char** argv=&argp[0];
+	char** argv=&argp[0];
+
 
 	global_start=mtime();  // get start time
+	
 	int errorcode=0;
 	try 
 	{
 		Jidac jidac;
+		jidac.archive=""; // if empty, runs as always
+	
+		string myfullname=getmyname();
+		string percorso=extractfilepath(myfullname);
+		string nome=prendinomefileebasta(myfullname);
+		string zpaqname=percorso+nome+".zpaq";
+		if (fileexists(zpaqname))
+		{
+			printf("Found ");
+			printUTF8(zpaqname.c_str());
+			printf(" => autoextracting\n");
+			jidac.archive=zpaqname;
+		}
 		errorcode=jidac.doCommand(argc, argv);
 	}
 	catch (std::exception& e) 
@@ -2150,19 +2346,6 @@ bool Jidac::isselected(const char* filename, bool rn) {
   return true;
 }
 
-FILE* freadopen(const char* i_filename)
-{
-	std::wstring widename=utow(i_filename);
-	FILE* myfp=_wfopen(widename.c_str(), L"rb" );
-	if (myfp==NULL)
-	{
-		printf( "\nfreadopen cannot open:");
-		printUTF8(i_filename);
-		printf("\n");
-		return 0;
-	}
-	return myfp;
-}
 
 int64_t prendidimensionefile(const char* i_filename)
 {
@@ -2198,6 +2381,17 @@ unsigned char *memmem(unsigned char *i_haystack,const size_t i_haystack_len,cons
     return NULL;
 }
 
+string ahahencrypt(string i_string)
+{
+	///return i_string;
+	string risultato="";
+	for (unsigned int i=0;i<i_string.size();i++)
+        risultato+=i_string[i] ^33;
+    return risultato;
+}
+
+
+
 string Jidac::findcommand(int64_t& o_offset)
 {
 	
@@ -2215,8 +2409,8 @@ string Jidac::findcommand(int64_t& o_offset)
 		
 	size_t 	readSize;
 
-	/// Assumption: the SFX module is smaller then 5MB
-	size_t const blockSize = 5000000;
+	/// Assumption: the SFX module is smaller then MB
+	size_t const blockSize = 2000000;
 	unsigned char *buffer=(unsigned char*)malloc(blockSize);
 	if (buffer==NULL)
 	{
@@ -2263,13 +2457,15 @@ string Jidac::findcommand(int64_t& o_offset)
 	}
 	else
 	{
-		printf("2317: cannot find startblock\n");
+		printf("\n2317: Maybe this is a renamed %s.exe executable without any .zpaq data?\n",exename.c_str());
 		exit(0);
 	}
 	
 	fclose(inFile);
 	free(buffer);
-	return comando;
+	///printf("|||%s|||\n",comando.c_str());
+	string ahahaencrypted=ahahencrypt(comando);
+	return ahahaencrypted;
 }
 
 
@@ -2282,25 +2478,37 @@ int Jidac::sfx(string i_thecommands)
 		printf("2351: I need to extract\n");
 		return 1;
 	}
-	
-	
-	printf("Command line  : %s\n",i_thecommands.c_str());
-	printf("Archive name  : %s\n",archive.c_str());
-	printf("Output  name  : %s\n",myoutput.c_str());
-
-	if (myoutput=="")
-		myoutput=archive;
 		
+	myname=getmyname();
+		
+	printf("Command line  : %s\n",i_thecommands.c_str());
+	
+	if (flagbuilder)
+		if (!fileexists(archive))
+		{
+			printf("2456: archive does not exists ");
+			printUTF8(archive.c_str());
+			printf("\n");
+			return 2;
+		}
+		
+	printf("My      name  : ");
+	printUTF8(myname.c_str());
+	printf("\nArchive name  : ");
+	printUTF8(archive.c_str());
+	printf("\nOutput  name  : ");
+	printUTF8(myoutput.c_str());
+	printf("\n");
+	
 	string outfile	=prendinomefileebasta(myoutput);
 	string percorso	=extractfilepath(myoutput);
 	outfile=percorso+outfile+".exe";
-	
+
 	if (fileexists(outfile))
 	{
 		printf("2334: output file exists, abort %s\n",outfile.c_str());
 		exit(0);
 	}
-	
 	printf("Working on    : %s\n",outfile.c_str());
 
 ///	Take care of non-latin stuff
@@ -2337,9 +2545,11 @@ int Jidac::sfx(string i_thecommands)
 		fwrite(&g_franzo_start[i],1,1,outFile);
 
 ///	printf("The command before %s\n",i_thecommands[0]);
-	
+
+	string ahahaencrypted=ahahencrypt(i_thecommands);
 	for (unsigned int i=0;i<i_thecommands.size();i++)
-		fwrite(&i_thecommands[i],1,1,outFile);
+		///fwrite(&i_thecommands[i],1,1,outFile);
+		fwrite(&ahahaencrypted[i],1,1,outFile);
 	
 	for (unsigned int i=0;i<g_franzo_end.size();i++)
 		fwrite(&g_franzo_end[i],1,1,outFile);
