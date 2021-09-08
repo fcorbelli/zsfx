@@ -1,13 +1,13 @@
 /*
-
 zsfx
 Windows 32/64 self extracting for ZPAQ archives,
 with multithread support and everything, just like zpaq 7.15
+Embedded in zpaqfranz for Windows
 
 Written by Franco Corbelli
 https://github.com/fcorbelli
 
-Very first version: lots of improvements to do
+Lots of improvements to do
 
 Targets
 Windows 64 (g++ 7.3.0)
@@ -18,12 +18,11 @@ c:\mingw32\bin\g++ -m32 -O3  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static
 
 */
 
-#define ZSFX_VERSION "52.12"
+#define ZSFX_VERSION "52.15"
 #define _FILE_OFFSET_BITS 64  // In Linux make sizeof(off_t) == 8
 #define UNICODE  // For Windows
 #include "libzpaq.h"
 #include <stdio.h>
-#include <string.h>
 #include <time.h>
 #include <stdint.h>
 #include <string>
@@ -35,23 +34,15 @@ c:\mingw32\bin\g++ -m32 -O3  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static
 using std::string;
 using std::vector;
 using std::map;
-using std::min;
-using std::max;
 using libzpaq::StringBuffer;
-string g_franzo_start;
-string g_franzo_end;
+// Global variables
 
-#define DEBUGX
+string 	g_franzo_start;
+string 	g_franzo_end;
+int64_t g_global_start=0;  // set to mtime() at start of main()
+int64_t g_startzpaq=0; 	// where the data begin
 
-
-bool isdirectory(string i_filename)
-{
-	if (i_filename.length()==0)
-		return false;
-	else
-	return
-		i_filename[i_filename.size()-1]=='/';
-}
+#define DEBUGX		// define to see a lot of things
 
 string extractfilename(const string& i_string) 
 {
@@ -95,33 +86,50 @@ inline char *  migliaia(uint64_t n)
 }
 
 // Handle errors in libzpaq and elsewhere
-void libzpaq::error(const char* msg) {
-  if (strstr(msg, "ut of memory")) throw std::bad_alloc();
-printf("%s\n",msg);
-exit(0);
+void libzpaq::error(const char* msg) 
+{
+	if (strstr(msg, "ut of memory")) 
+		throw std::bad_alloc();
+	printf("%s\n",msg);
+	exit(0);
 }
 using libzpaq::error;
 
 typedef DWORD ThreadReturn;
 typedef HANDLE ThreadID;
-void run(ThreadID& tid, ThreadReturn(*f)(void*), void* arg) {
-  tid=CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)f, arg, 0, NULL);
-  if (tid==NULL) error("CreateThread failed");
+void run(ThreadID& tid, ThreadReturn(*f)(void*), void* arg) 
+{
+	tid=CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)f, arg, 0, NULL);
+	if (tid==NULL) 
+		error("CreateThread failed");
 }
-void join(ThreadID& tid) {WaitForSingleObject(tid, INFINITE);}
+void join(ThreadID& tid) 
+{
+		WaitForSingleObject(tid, INFINITE);
+}
+
 typedef HANDLE Mutex;
-void init_mutex(Mutex& m) {m=CreateMutex(NULL, FALSE, NULL);}
-void lock(Mutex& m) {WaitForSingleObject(m, INFINITE);}
-void release(Mutex& m) {ReleaseMutex(m);}
-void destroy_mutex(Mutex& m) {CloseHandle(m);}
+void init_mutex(Mutex& m) 
+{
+	m=CreateMutex(NULL, FALSE, NULL);
+}
 
-
-// Global variables
-int64_t global_start=0;  // set to mtime() at start of main()
+void lock(Mutex& m) 
+{
+	WaitForSingleObject(m, INFINITE);
+}
+void release(Mutex& m) 
+{
+		ReleaseMutex(m);
+}
+void destroy_mutex(Mutex& m) 
+{
+	CloseHandle(m);
+}
 
 // In Windows, convert 16-bit wide string to UTF-8 and \ to /
-
-string wtou(const wchar_t* s) {
+string wtou(const wchar_t* s) 
+{
   assert(sizeof(wchar_t)==2);  // Not true in Linux
   assert((wchar_t)(-1)==65535);
   string r;
@@ -137,7 +145,8 @@ string wtou(const wchar_t* s) {
 
 // In Windows, convert UTF-8 string to wide string ignoring
 // invalid UTF-8 or >64K. Convert "/" to slash (default "\").
-std::wstring utow(const char* ss, char slash='\\') {
+std::wstring utow(const char* ss, char slash='\\') 
+{
   assert(sizeof(wchar_t)==2);
   assert((wchar_t)(-1)==65535);
   std::wstring r;
@@ -170,7 +179,8 @@ bool fileexists(const string& i_filename)
 }
 
 // Print a UTF-8 string to f (stdout, stderr) so it displays properly
-void printUTF8(const char* s, FILE* f=stdout) {
+void printUTF8(const char* s, FILE* f=stdout) 
+{
   assert(f);
   assert(s);
   const HANDLE h=(HANDLE)_get_osfhandle(_fileno(f));
@@ -186,12 +196,13 @@ void printUTF8(const char* s, FILE* f=stdout) {
 }
 
 // Return relative time in milliseconds
-int64_t mtime() {
+int64_t mtime() 
+{
   int64_t t=GetTickCount();
-  if (t<global_start) t+=0x100000000LL;
+  if (t<g_global_start) 
+	t+=0x100000000LL;
   return t;
 }
-
 
 
 /////////////////////////////// File //////////////////////////////////
@@ -215,7 +226,8 @@ FP fopen(const char* filename, MODE mode) {
 }
 
 // Close file
-int fclose(FP fp) {
+int fclose(FP fp) 
+{
   return CloseHandle(fp) ? 0 : EOF;
 }
 
@@ -253,9 +265,9 @@ int64_t ftello(FP fp) {
   return r+(uint64_t(h)<<32);
 }
 
-
 // Return true if a file or directory (UTF-8 without trailing /) exists.
-bool exists(string filename) {
+bool exists(string filename) 
+{
   int len=filename.size();
   if (len<1) return false;
   if (filename[len-1]=='/') filename=filename.substr(0, len-1);
@@ -265,7 +277,8 @@ bool exists(string filename) {
 
 
 // Print last error message
-void printerr(const char* filename) {
+void printerr(const char* filename) 
+{
   fflush(stdout);
   int err=GetLastError();
   printUTF8(filename, stderr);
@@ -319,10 +332,11 @@ const bool ads=strstr(filename, ":$DATA")!=0;  // alternate data stream?
 }
 
 // Print file open error and throw exception
-void ioerr(const char* msg) {
+void ioerr(const char* msg) 
+{
   printerr(msg);
   exit(0);
- }
+}
 
 // Create directories as needed. For example if path="/tmp/foo/bar"
 // then create directories /, /tmp, and /tmp/foo unless they exist.
@@ -417,6 +431,13 @@ public:
   int64_t tell() {
     return off;
   }
+#if defined(DEBUG)
+  int64_t tello()
+  {
+	return ftello(fp);
+  
+ }
+#endif
 };
 
 // Like fseeko. If p is out of range then close file.
@@ -432,8 +453,9 @@ void InputArchive::seek(int64_t p, int whence) {
   }
 
   // Optimization for single file to avoid close and reopen
-  if (sz.size()==1) {
-    fseeko(fp, off, SEEK_SET);
+  if (sz.size()==1) 
+  {
+    fseeko(fp, off+g_startzpaq, SEEK_SET);
     return;
   }
 
@@ -449,7 +471,7 @@ void InputArchive::seek(int64_t p, int whence) {
   fclose(fp);
   fp=fopen(next.c_str(), RB);
   if (fp==FPNULL) ioerr(next.c_str());
-  fseeko(fp, off-sum, SEEK_END);
+  fseeko(fp, off-sum+g_startzpaq, SEEK_END);
 }
 
 // Open for input. Decrypt with password and using the salt in the
@@ -477,120 +499,34 @@ InputArchive::InputArchive(const char* filename, const char* password):
   fp=fopen(part1.c_str(), RB);
   if (!isopen()) ioerr(part1.c_str());
   assert(fp!=FPNULL);
+  seek(0,SEEK_SET);  /// go to right position
 
   // Get encryption salt
-  if (password) {
+  if (password) 
+  {
+#if defined(DEBUG)
+	printf("Prendo il sale\n");
+	printf("Z1 tello                    %ld\n",ftello(fp));
+#endif
+
     char salt[32], key[32];
     if (fread(salt, 1, 32, fp)!=32) error("cannot read salt");
+#if defined(DEBUG)
+	printf("Sale ");
+	for (int i=0;i<32;i++)
+		printf("%02X",(unsigned char)salt[i]);
+	printf("\n");
+#endif
+
     libzpaq::stretchKey(key, password, salt);
     aes=new libzpaq::AES_CTR(key, 32, salt);
-    off=32;
+	off=32;
+#if defined(DEBUG)
+	printf("Off vale ora %d\n",off);
+#endif
   }
 }
 
-// An Archive is a file supporting encryption
-class OutputArchive: public ArchiveBase, public libzpaq::Writer {
-  int64_t off;    // preceding multi-part bytes
-  unsigned ptr;   // write pointer in buf: 0 <= ptr <= BUFSIZE
-  enum {BUFSIZE=1<<16};
-  char buf[BUFSIZE];  // I/O buffer
-public:
-
-  // Open. If password then encrypt output.
-  OutputArchive(const char* filename, const char* password=0,
-                const char* salt_=0, int64_t off_=0);
-
-  // Write pending output
-  void flush() {
-    assert(fp!=FPNULL);
-    if (aes) aes->encrypt(buf, ptr, ftello(fp)+off);
-    fwrite(buf, 1, ptr, fp);
-    ptr=0;
-  }
-
-  // Position the next read or write offset to p.
-  void seek(int64_t p, int whence) {
-    if (fp!=FPNULL) {
-      flush();
-      fseeko(fp, p, whence);
-    }
-    else if (whence==SEEK_SET) off=p;
-    else off+=p;  // assume at end
-  }
-
-  // Return current file offset.
-  int64_t tell() const {
-    if (fp!=FPNULL) return ftello(fp)+ptr;
-    else return off;
-  }
-
-  // Write one byte
-  void put(int c) {
-    if (fp==FPNULL) ++off;
-    else {
-      if (ptr>=BUFSIZE) flush();
-      buf[ptr++]=c;
-    }
-  }
-
-  // Write buf[0..n-1]
-  void write(const char* ibuf, int len) {
-    if (fp==FPNULL) off+=len;
-    else while (len-->0) put(*ibuf++);
-  }
-
-  // Flush output and close
-  void close() {
-    if (fp!=FPNULL) {
-      flush();
-      fclose(fp);
-    }
-    fp=FPNULL;
-  }
-};
-
-// Create or update an existing archive or part. If filename is ""
-// then keep track of position in off but do not write to disk. Otherwise
-// open and encrypt with password if not 0. If the file exists then
-// read the salt from the first 32 bytes and off_ must be 0. Otherwise
-// encrypt assuming off_ previous bytes, of which the first 32 are salt_.
-// If off_ is 0 then write salt_ to the first 32 bytes.
-
-OutputArchive::OutputArchive(const char* filename, const char* password,
-    const char* salt_, int64_t off_): off(off_), ptr(0) {
-  assert(filename);
-  if (!*filename) return;
-
-  // Open existing file
-  char salt[32]={0};
-  fp=fopen(filename, RBPLUS);
-  if (isopen()) {
-    if (off!=0) error("file exists and off > 0");
-    if (password) {
-      if (fread(salt, 1, 32, fp)!=32) error("cannot read salt");
-      if (salt_ && memcmp(salt, salt_, 32)) error("salt mismatch");
-    }
-    seek(0, SEEK_END);
-  }
-
-  // Create new file
-  else {
-    fp=fopen(filename, WB);
-    if (!isopen()) ioerr(filename);
-    if (password) {
-      if (!salt_) error("salt not specified");
-      memcpy(salt, salt_, 32);
-      if (off==0 && fwrite(salt, 1, 32, fp)!=32) ioerr(filename);
-    }
-  }
-
-  // Set up encryption
-  if (password) {
-    char key[32];
-    libzpaq::stretchKey(key, password, salt);
-    aes=new libzpaq::AES_CTR(key, 32, salt);
-  }
-}
 
 ///////////////////////// System info /////////////////////////////////
 
@@ -748,7 +684,6 @@ public:
 	friend struct ExtractJob;
 	string archive;           // archive name
 private:
-	int64_t startzpaq; // where the data begin
 	string exename;
 	string myname;
 	string myoutput;
@@ -784,6 +719,7 @@ private:
 	void usage();             // help
 
 	string findcommand(int64_t& o_offset);
+	void getpasswordifempty();
 
   // Support functions
 	string rename(string name);           // rename from -to
@@ -803,9 +739,8 @@ void Jidac::usage()
 	printf("Ex    1: %s x z:\\1.zpaq -to y:\\testme\\ -output z:\\mynewsfx.exe",exename.c_str());
 	printf("\n\n");
 	printf("Usage 2: Autoextract .zpaq with the same name of the .exe (if any)\n");
-	printf("Ex    2: c:\\pippo\\testme.exe (a copy of %s.exe) will autoextract c:\\pippo\\testme.zpaq\n",exename.c_str());
-	printf("Note  2: encrypted autoextracted-archives are supported (-key)\n");
-	printf("\nFilenames zsfx.exe/zsfx32.exe are used, do NOT rename\n");
+	printf("Ex    2: c:\\pluto\\testme.exe (a copy of %s.exe) will autoextract c:\\pluto\\testme.zpaq\n",exename.c_str());
+	printf("\nFilenames zsfx.exe/zsfx32.exe are reserved, do NOT rename\n");
 	printf("Switches -all -force -noattributes -not -only -to -summary -threads -until\n");
 	exit(1);
 }
@@ -914,6 +849,8 @@ bool check_if_password(string i_filename)
 		exit(0);
 	}
     char s[4]={0};
+	if (g_startzpaq)
+		fseek(inFile,g_startzpaq,SEEK_SET);
     const int nr=fread(s,1,4,inFile);
 ///	for (int i=0;i<4;i++)
 ///		printf("%d  %c  %d\n",i,s[i],s[i]);
@@ -946,7 +883,23 @@ void explode(string i_string,char i_delimiter,vector<string>& array)
 			break;
     }
 }
-
+void Jidac::getpasswordifempty()
+{
+	if (password==NULL)
+		if (check_if_password(archive))
+		{
+			printf("Archive seems encrypted (or corrupted)");
+			string spassword=getpassword();
+			if (spassword!="")
+			{
+				libzpaq::SHA256 sha256;
+				for (unsigned int i=0;i<spassword.size();i++)
+					sha256.put(spassword[i]);
+				memcpy(password_string, sha256.result(), 32);
+				password=password_string;
+			}
+		}
+}	
 
 // Parse the command line. Return 1 if error else 0.
 int Jidac::doCommand(int argc,  char** argv) 
@@ -989,11 +942,14 @@ int Jidac::doCommand(int argc,  char** argv)
 	///printf("myname is |%s|\n",myname.c_str());
 		
 	
-	printf("zsfx(franz) v" ZSFX_VERSION " by Franco Corbelli - compiled "
-         __DATE__ "\n");
+#if defined(_WIN64)
+	printf("zsfx(franz) v" ZSFX_VERSION " by Franco Corbelli - compiled " __DATE__ "\n");
+#else
+	printf("zsfx32(franz) v" ZSFX_VERSION " by Franco Corbelli - compiled " __DATE__ "\n");
+#endif
 
 	
-	startzpaq=0;
+	g_startzpaq=0;
 	
 	bool 	autoextract=(archive!="");
 	bool	flagbuilder=(myname=="zsfx.exe")||(myname=="zsfx32.exe");
@@ -1003,11 +959,11 @@ int Jidac::doCommand(int argc,  char** argv)
 	if (!autoextract)
 	if (!flagbuilder)
 	{
-		string comandi=findcommand(startzpaq);
+		string comandi=findcommand(g_startzpaq);
 		printf("Extracting from EXE with parameters: x %s\n",comandi.c_str());
 		//printf("Extracting from EXE\n");
 		///printf("Start   %ld\n",startzpaq);
-		if (startzpaq==0)
+		if (g_startzpaq==0)
 		{
 			printf("860:Something is WRONG\n");
 			exit(0);
@@ -1107,8 +1063,9 @@ int Jidac::doCommand(int argc,  char** argv)
 	else if (opt=="-key") 
 		{
 			if (i<argc-1) // I am not the last parameter
-				if (argv[i+1][0]!='-') // -key pippo -whirlpool
+				if (argv[i+1][0]!='-') // -key  -whirlpool
 				{
+					printf("La decodifico\n");
 					libzpaq::SHA256 sha256;
 					for (const char* p=argv[++i]; *p; ++p)
 						sha256.put(*p);
@@ -1238,27 +1195,15 @@ int Jidac::doCommand(int argc,  char** argv)
 	if (autoextract)
 	{
 		command='x';
-		if (password==NULL)
-			if (check_if_password(archive))
-			{
-				printf("Archive seems encrypted (or corrupted)");
-				string spassword=getpassword();
-				if (spassword!="")
-				{
-					libzpaq::SHA256 sha256;
-					for (unsigned int i=0;i<spassword.size();i++)
-						sha256.put(spassword[i]);
-					memcpy(password_string, sha256.result(), 32);
-					password=password_string;
-				}
-			}
+		getpasswordifempty();
 		return extract();
 	
 	}
-	if (startzpaq>0)
+	if (g_startzpaq>0)
 	{
 		/// Houston, the magic is into startzpaq
 		archive=myname;
+		getpasswordifempty();
 		return extract();
 	}
 	else
@@ -1268,10 +1213,10 @@ int Jidac::doCommand(int argc,  char** argv)
 		myreplace(thecommands,archive,rimpiazza);
 		rimpiazza="dummy.exe";
 		myreplace(thecommands,myoutput,rimpiazza);
-		
 		return sfx(thecommands);
 	}
-	else usage();
+	else 
+		usage();
 	return 0;
 }
 
@@ -1303,18 +1248,38 @@ int64_t Jidac::read_archive(const char* arc, int *errors) {
   fflush(stdout);
 
 
-/// This is the "magic" of zsfx. Yes, only a couple of lines
-	if (startzpaq>0)
-		in.seek(startzpaq, SEEK_SET);
-
+	in.seek(0,SEEK_SET);	// note: the magic is here
+	printf("\n");
+	
+	if (password)
+	{
+#if defined(DEBUG)
+		printf("HOUston abbiamo una password!\n");
+#endif
+		in.seek(32,SEEK_SET);
+	}
+#if defined(DEBUG)
+	printf("K0 Inizio a decodificare da %ld\n",in.tell());
+	printf("K0 tello                    %ld\n",in.tello());
+#endif
+	
   // Test password
-  {
+  
     char s[4]={0};
-    const int nr=in.read(s, 4);
+    int nr=in.read(s, 4);
+#if defined(DEBUG)
+	printf("\nPrendo 4 byte firma\n");
+
+	for (int i=0;i<4;i++)
+		printf("%d %02X %c\n",i,(unsigned char)s[i],s[i]);
+#endif
     if (nr>0 && memcmp(s, "7kSt", 4) && (memcmp(s, "zPQ", 3) || s[3]<1))
-      error("password incorrect");
-    in.seek(-nr, SEEK_CUR);
-  }
+		error("Password kaputt");
+	in.seek(-nr, SEEK_CUR);
+#if defined(DEBUG)
+	printf("K2 Inizio a decodificare da %ld\n",in.tell());
+	printf("K2 tello                    %ld\n",in.tello());
+#endif
 
   // Scan archive contents
   string lastfile=archive; // last named file in streaming format
@@ -1331,6 +1296,11 @@ int64_t Jidac::read_archive(const char* arc, int *errors) {
   // and hashes. In JIDAC format, these are in the index blocks, allowing
   // data to be skipped. Otherwise the whole archive is scanned to get
   // this information from the segment headers and trailers.
+  
+#if defined(DEBUG)  
+  printf("K3 Inizio a decodificare da %ld\n",in.tell());
+  printf("K3 tello                    %ld\n",in.tello());
+#endif
   bool done=false;
   while (!done) {
     libzpaq::Decompresser d;
@@ -1338,6 +1308,9 @@ int64_t Jidac::read_archive(const char* arc, int *errors) {
       d.setInput(&in);
       double mem=0;
       while (d.findBlock(&mem)) {
+#if defined(DEBUG)
+		  printf("Trovato un blocco\n");
+#endif
         found_data=true;
 
         // Read the segments in the current block
@@ -1574,6 +1547,11 @@ int64_t Jidac::read_archive(const char* arc, int *errors) {
     }
 endblock:;
   }  // end while !done
+#if defined(DEBUG)
+  if (!found_data)
+  	printf("no found data\n");
+ 
+#endif
   if (in.tell()>32*(password!=0) && !found_data)
     error("archive contains no data");
   printf("%d versions, %u files, %s bytes\n", 
@@ -1609,19 +1587,6 @@ void print_progress(int64_t ts, int64_t td)
 	printf("%5.2f%%\r", td*100.0/(ts+0.5));
 }
 
-// For writing to two archives at once
-struct WriterPair: public libzpaq::Writer {
-  OutputArchive *a, *b;
-  void put(int c) {
-    if (a) a->put(c);
-    if (b) b->put(c);
-  }
-  void write(const char* buf, int n) {
-    if (a) a->write(buf, n);
-    if (b) b->write(buf, n);
-  }
-  WriterPair(): a(0), b(0) {}
-};
 
 
 /////////////////////////////// extract ///////////////////////////////
@@ -1774,12 +1739,7 @@ ThreadReturn decompressThread(void* arg) {
         while (out.size()<output_size && d.decompress(1<<14));
         lock(job.mutex);
         print_progress(job.total_size, job.total_done);
-        /*
-		if (job.jd.summary<=0)
-          printf("[%d..%d] -> %1.0f\n", b.start, b.start+b.size-1,
-              out.size()+0.0);
-			  */
-			
+		
         release(job.mutex);
         if (out.size()>=output_size) break;
         d.readSegmentEnd();
@@ -1881,14 +1841,6 @@ ThreadReturn decompressThread(void* arg) {
             if (job.jd.summary<=0) {
               lock(job.mutex);
               print_progress(job.total_size, job.total_done);
-              /*
-			  if (job.jd.summary<=0) {
-                printf("1> ");
-                printUTF8(filename.c_str());
-                printf("\n");
-              }
-			  */
-			  
               release(job.mutex);
             }
 			{
@@ -2026,10 +1978,7 @@ int Jidac::extract() {
       error("overlapping blocks");
   }
 
-  // Create index instead of extract files
- 
-
-  // Label files to extract with data=0.
+   // Label files to extract with data=0.
   // Skip existing output files. If force then skip only if equal
   // and set date and attributes.
   ExtractJob job(*this);
@@ -2270,8 +2219,9 @@ int Jidac::extract() {
 
 /////////////////////////////// main //////////////////////////////////
 
+/// N: no argc or argv, we'll work on it
 /// Convert argv to UTF-8 and replace \ with /
-/// Get ready to a "rewrite" of argc and argv
+
 int main() 
 {
 	int argc=0;
@@ -2285,8 +2235,7 @@ int main()
 	}
 	char** argv=&argp[0];
 
-
-	global_start=mtime();  // get start time
+	g_global_start=mtime();  // get start time
 	
 	int errorcode=0;
 	try 
@@ -2294,10 +2243,10 @@ int main()
 		Jidac jidac;
 		jidac.archive=""; // if empty, runs as always
 	
-		string myfullname=getmyname();
-		string percorso=extractfilepath(myfullname);
-		string nome=prendinomefileebasta(myfullname);
-		string zpaqname=percorso+nome+".zpaq";
+		string myfullname	=getmyname();
+		string percorso		=extractfilepath(myfullname);
+		string nome			=prendinomefileebasta(myfullname);
+		string zpaqname		=percorso+nome+".zpaq";
 		if (fileexists(zpaqname))
 		{
 			printf("Found ");
@@ -2314,7 +2263,7 @@ int main()
 		errorcode=2;
 	}
 	fflush(stdout);
-	fprintf(stderr, "%1.3f seconds %s\n", (mtime()-global_start)/1000.0,
+	fprintf(stderr, "%1.3f seconds %s\n", (mtime()-g_global_start)/1000.0,
 		errorcode>1 ? "(with errors)" :
 		errorcode>0 ? "(with warnings)" : "(all OK)");
   return errorcode;
@@ -2360,9 +2309,12 @@ int64_t prendidimensionefile(const char* i_filename)
 		return dimensione;
 	}
 	else
-	return 0;
+		return 0;
 }
 
+/*
+	Very crude search, no fancy algos needed
+*/
 unsigned char *memmem(unsigned char *i_haystack,const size_t i_haystack_len,const char *i_needle,const size_t i_needle_len)
 {
     int needle_first;
@@ -2381,6 +2333,9 @@ unsigned char *memmem(unsigned char *i_haystack,const size_t i_haystack_len,cons
     return NULL;
 }
 
+/*
+	The most powerful encryption ever!
+*/
 string ahahencrypt(string i_string)
 {
 	///return i_string;
@@ -2391,14 +2346,14 @@ string ahahencrypt(string i_string)
 }
 
 
-
 string Jidac::findcommand(int64_t& o_offset)
 {
 	
 	o_offset=0;
-	
 	myname=getmyname();
-///	printf("My name is %s\n",myname.c_str());
+#if defined(DEBUG)
+	printf("My name is %s\n",myname.c_str());
+#endif
 	FILE* inFile = freadopen(myname.c_str());
 	if (inFile==NULL) 
 	{
@@ -2409,7 +2364,7 @@ string Jidac::findcommand(int64_t& o_offset)
 		
 	size_t 	readSize;
 
-	/// Assumption: the SFX module is smaller then MB
+	/// Assumption: the SFX module is smaller then 2MB
 	size_t const blockSize = 2000000;
 	unsigned char *buffer=(unsigned char*)malloc(blockSize);
 	if (buffer==NULL)
@@ -2418,7 +2373,7 @@ string Jidac::findcommand(int64_t& o_offset)
 		exit(0);
 	}
 		
-	string comando="";
+	string comando	="";
 	readSize = fread(buffer, 1, blockSize, inFile);
 
 	bool flagbuilder=(myname=="zsfx.exe")||(myname=="zsfx32.exe");
@@ -2439,6 +2394,7 @@ string Jidac::findcommand(int64_t& o_offset)
 	
 	if (startblock!=NULL)
 	{
+		/// OK start again from 0, it's a small size after all...
 		unsigned char* endblock=memmem(buffer,readSize,g_franzo_end.c_str(),g_franzo_end.size());
 		if (endblock!=NULL)
 		{
@@ -2463,11 +2419,12 @@ string Jidac::findcommand(int64_t& o_offset)
 	
 	fclose(inFile);
 	free(buffer);
-	///printf("|||%s|||\n",comando.c_str());
+#if defined(DEBUG)
+	printf("|||%s|||\n",comando.c_str());
+#endif
 	string ahahaencrypted=ahahencrypt(comando);
 	return ahahaencrypted;
 }
-
 
 int Jidac::sfx(string i_thecommands)
 {
@@ -2479,7 +2436,7 @@ int Jidac::sfx(string i_thecommands)
 		return 1;
 	}
 		
-	myname=getmyname();
+	myname=getmyname(); // this is the FULL name now
 		
 	printf("Command line  : %s\n",i_thecommands.c_str());
 	
@@ -2499,6 +2456,8 @@ int Jidac::sfx(string i_thecommands)
 	printf("\nOutput  name  : ");
 	printUTF8(myoutput.c_str());
 	printf("\n");
+	if (myoutput=="")
+		myoutput=archive;
 	
 	string outfile	=prendinomefileebasta(myoutput);
 	string percorso	=extractfilepath(myoutput);
@@ -2538,13 +2497,11 @@ int Jidac::sfx(string i_thecommands)
 	
 	fclose(inFile);
 	
-	/// yes, one byte at time. Why? Because some too smart compilers can substitute too much
+	/// yes, one byte at time. Why? Because some "too smart" compilers can substitute too much
 	/// please note: the strings is already inverted 
 	
 	for (unsigned int i=0;i<g_franzo_start.size();i++)
 		fwrite(&g_franzo_start[i],1,1,outFile);
-
-///	printf("The command before %s\n",i_thecommands[0]);
 
 	string ahahaencrypted=ahahencrypt(i_thecommands);
 	for (unsigned int i=0;i<i_thecommands.size();i++)
@@ -2579,6 +2536,8 @@ int Jidac::sfx(string i_thecommands)
 	printf("Block1        : %19s\n",migliaia(g_franzo_start.size()));
 	printf("Command       : %19s\n",migliaia(i_thecommands.size()));
 	printf("Block2        : %19s\n",migliaia(g_franzo_end.size()));
+	printf("Start         :                      %s\n",migliaia(sfxsize+g_franzo_start.size()+i_thecommands.size()+g_franzo_end.size()));
+	
 	printf("ZPAQ archive  : %19s\n",migliaia(zpaqsize));
 
 	printf("Expected      : %19s\n",migliaia(sfxsize+zpaqsize+g_franzo_start.size()+g_franzo_end.size()+i_thecommands.size()));
