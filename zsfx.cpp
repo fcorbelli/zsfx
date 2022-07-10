@@ -13,12 +13,19 @@ Targets
 Windows 64 (g++ 7.3.0)
 g++ -O3 zsfx.cpp libzpaq.cpp -o zsfx -static
 
+(more aggressive) 10.3.0 beware of -flto
+g++ -Os zsfx.cpp libzpaq.cpp -o zsfx -static -fno-rtti -Wl,--gc-sections -fdata-sections -flto
+
 Windows 32 (g++ 7.3.0)
 c:\mingw32\bin\g++ -m32 -O3  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static
 
+(more aggressive) 10.3.0 -flto
+c:\mingw32\bin\g++ -m32 -Os  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static -fno-rtti  -Wl,--gc-sections -flto
+
+
 */
 
-#define ZSFX_VERSION "52.15"
+#define ZSFX_VERSION "55.1"
 #define _FILE_OFFSET_BITS 64  // In Linux make sizeof(off_t) == 8
 #define UNICODE  // For Windows
 #include "libzpaq.h"
@@ -30,6 +37,7 @@ c:\mingw32\bin\g++ -m32 -O3  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static
 #include <map>
 #include <windows.h>
 #include <io.h>
+#include <conio.h>
 
 using std::string;
 using std::vector;
@@ -728,13 +736,44 @@ private:
 	bool equal(DTMap::const_iterator p, const char* filename);
  };
 
+
+/// no buffer overflow protection etc etc
+
+string getline(string i_default) 
+{
+    size_t maxline 	= 255+1;
+    char* line 		= (char*)malloc(maxline); // sfx module, keep it small
+	char* p_line 	= line;
+	int c;
+
+    if (line==NULL)
+		error("744: allocating memory");
+	
+	if (i_default!="")
+		printf("%s",i_default.c_str());
+
+    while((unsigned)(p_line-line)<maxline) 
+	{
+        c = fgetc(stdin);
+		
+        if(c==EOF)
+            break;
+
+        if((*p_line++ = c)=='\n')
+            break;
+    }
+    *--p_line = '\0';
+    return line;
+}
+
+
 // Print help message
 void Jidac::usage() 
 {
 	printf("\nGitHub https://github.com/fcorbelli/zsfx\n\n");
 
 	printf("Usage 1: %s x nameofzpaqfile (...zpaq extraction switches) (-output mynewsfx.exe)\n",exename.c_str());
-	printf("Ex    1: %s x z:\\1.zpaq\n",exename.c_str());
+	printf("Ex    1: %s x z:\\1.zpaq    [z:\\1.exe will ask for -to from console] \n",exename.c_str());
 	printf("Ex    1: %s x z:\\1.zpaq -to .\\xtracted\\\n",exename.c_str());
 	printf("Ex    1: %s x z:\\1.zpaq -to y:\\testme\\ -output z:\\mynewsfx.exe",exename.c_str());
 	printf("\n\n");
@@ -742,6 +781,7 @@ void Jidac::usage()
 	printf("Ex    2: c:\\pluto\\testme.exe (a copy of %s.exe) will autoextract c:\\pluto\\testme.zpaq\n",exename.c_str());
 	printf("\nFilenames zsfx.exe/zsfx32.exe are reserved, do NOT rename\n");
 	printf("Switches -all -force -noattributes -not -only -to -summary -threads -until\n");
+
 	exit(1);
 }
 
@@ -790,7 +830,6 @@ bool myreplace(string& i_str, const string& i_from, const string& i_to)
     i_str.replace(start_pos, i_from.length(), i_to);
     return true;
 }
-#include <conio.h>
 string getpassword()
 {
 	string myresult="";
@@ -806,23 +845,7 @@ string getpassword()
 	}
 	printf("\n");
 	return myresult;
-/*
-	char myline[251];
-	unsigned int i=0;
-    int c;
-	printf("\nEnter password (max %d chars):",(int)sizeof(myline)-1);
-	
-	while (1)
-	{
-		while (( (c = getchar())!='\n') && (c!= EOF) && (i< sizeof(myline)-1) )
-			myline[i++] = c;
-		myline[i] = '\0';
-		myresult=myline;
-		if (myresult!="")
-				break;
-	}
-	return myresult;
-	*/
+
 }
 
 FILE* freadopen(const char* i_filename)
@@ -1960,7 +1983,17 @@ bool yesorno(int i_ok)
     ///printf("%d %c\n", n, n);
 }
 // This is just equal to ZPAQ 7.15, so can works with zpaqfranz too
-int Jidac::extract() {
+int Jidac::extract() 
+{
+	/// using SFX module, without -to, ask what to do
+	if (tofiles.size()==0)
+	{
+		string where=getline("Path to extract into (empty=default) :");
+		if (where!="")
+			tofiles.push_back(where);
+	}
+	
+	
   // Read archive
   const int64_t sz=read_archive(archive.c_str());
   if (sz<1) error("archive not found");
@@ -2364,8 +2397,8 @@ string Jidac::findcommand(int64_t& o_offset)
 		
 	size_t 	readSize;
 
-	/// Assumption: the SFX module is smaller then 2MB
-	size_t const blockSize = 2000000;
+	/// Assumption: the SFX module is smaller then 3MB
+	size_t const blockSize = 3000000;
 	unsigned char *buffer=(unsigned char*)malloc(blockSize);
 	if (buffer==NULL)
 	{
