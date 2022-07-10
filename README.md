@@ -31,6 +31,7 @@ _Do NOT rename zsfx.exe and zsfx32.exe to something else_
 
 - [Matt Mahoney (of course)](http://mattmahoney.net/)
 - SeDD user of the encode.ru forum
+- This user (https://github.com/dertuxmalwieder)
 
 # How to build
 In this case only Windows is supported, be careful to link the pthread library.  
@@ -38,13 +39,17 @@ Today it is splitted into 3 source code, not merged as zpaqfranz, because no "st
 
 Targets
 ```
-Quick-and-dirty
-g++ zsfx.cpp libzpaq.cpp -o zsfx
-
-Size optimizations
+Targets
 Windows 64 (g++ 7.3.0)
-g++ -Os zsfx.cpp libzpaq.cpp -o zsfx -static -fno-rtti -Wl,--gc-sections
+g++ -O3 zsfx.cpp libzpaq.cpp -o zsfx -static
+
+(more aggressive) 10.3.0 beware of -flto
+g++ -Os zsfx.cpp libzpaq.cpp -o zsfx -static -fno-rtti -Wl,--gc-sections -fdata-sections -flto
 
 Windows 32 (g++ 7.3.0)
-c:\mingw32\bin\g++ -m32 -Os  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static -fno-rtti  -Wl,--gc-sections
+c:\mingw32\bin\g++ -m32 -O3  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static
+
+(more aggressive) 10.3.0 -flto
+c:\mingw32\bin\g++ -m32 -Os  zsfx.cpp libzpaq.cpp -o zsfx32 -pthread -static -fno-rtti  -Wl,--gc-sections -flto
+
 ```
